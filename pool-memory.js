@@ -10,6 +10,18 @@ import { log } from "./logger.js";
 import { config } from "./config.js";
 
 const POOL_MEMORY_FILE = "./pool-memory.json";
+const MAX_NOTE_LENGTH = 280;
+
+function sanitizeStoredNote(text, maxLen = MAX_NOTE_LENGTH) {
+  if (text == null) return null;
+  const cleaned = String(text)
+    .replace(/[\r\n\t]+/g, " ")
+    .replace(/\s+/g, " ")
+    .replace(/[<>`]/g, "")
+    .trim()
+    .slice(0, maxLen);
+  return cleaned || null;
+}
 
 function load() {
   if (!fs.existsSync(POOL_MEMORY_FILE)) return {};
@@ -292,7 +304,8 @@ export function recallForPool(poolAddress) {
   // Notes
   if (entry.notes?.length > 0) {
     const lastNote = entry.notes[entry.notes.length - 1];
-    lines.push(`NOTE: ${lastNote.note}`);
+    const safeNote = sanitizeStoredNote(lastNote.note);
+    if (safeNote) lines.push(`NOTE: ${safeNote}`);
   }
 
   return lines.length > 0 ? lines.join("\n") : null;
@@ -304,7 +317,8 @@ export function recallForPool(poolAddress) {
  */
 export function addPoolNote({ pool_address, note }) {
   if (!pool_address) return { error: "pool_address required" };
-  if (!note) return { error: "note required" };
+  const safeNote = sanitizeStoredNote(note);
+  if (!safeNote) return { error: "note required" };
 
   const db = load();
 
@@ -323,11 +337,11 @@ export function addPoolNote({ pool_address, note }) {
   }
 
   db[pool_address].notes.push({
-    note,
+    note: safeNote,
     added_at: new Date().toISOString(),
   });
 
   save(db);
-  log("pool-memory", `Note added to ${pool_address.slice(0, 8)}: ${note}`);
-  return { saved: true, pool_address, note };
+  log("pool-memory", `Note added to ${pool_address.slice(0, 8)}: ${safeNote}`);
+  return { saved: true, pool_address, note: safeNote };
 }
