@@ -1,19 +1,19 @@
 {
-  "_note": "NANOCAP-V1 — Phase 2 (scaled). Nanocap DLMM mean-reversion accumulation. 1.5 SOL / 5.0 SOL wallet. Scaled 2026-04-17 after 5-day forward test (136 closes, 79.4% raw win rate, +18.7% wallet return). See nanocap-v1 branch. DeepSeek keys resolve from env:DEEPSEEK_API_KEY.",
+  "_note": "Public nanocap example only. This is not a live owner config, performance claim, or recommended sizing. Copy to user-config.json and choose your own RPC, keys, thresholds, and risk limits. API keys can resolve from env:NAME values where supported.",
 
   "preset": "nanocap-v1",
   "rpcUrl": "YOUR_HELIUS_RPC_URL",
   "llmBaseUrl": "https://api.deepseek.com",
   "llmApiKey": "env:DEEPSEEK_API_KEY",
   "llmModel": "deepseek-v4-flash",
-  "dryRun": false,
+  "dryRun": true,
 
-  "deployAmountSol": 1.5,
-  "maxPositions": 2,
-  "minSolToOpen": 0.5,
-  "maxDeployAmount": 1.55,
+  "deployAmountSol": 0.25,
+  "maxPositions": 1,
+  "minSolToOpen": 0.15,
+  "maxDeployAmount": 0.3,
   "gasReserve": 0.20,
-  "positionSizePct": 0.35,
+  "positionSizePct": 0.1,
 
   "strategy": "bid_ask",
   "binsBelow": 85,
@@ -23,7 +23,7 @@
 
   "timeframe": "4h",
   "category": "trending",
-  "discoveryPageSize": 100,
+  "discoveryPageSize": 50,
   "discoveryExtraCategories": ["new"],
   "excludeHighSupplyConcentration": false,
   "excludeHighSingleOwnership": false,
@@ -39,7 +39,7 @@
   "minBinStep": 50,
   "maxBinStep": 250,
   "minFeeActiveTvlRatio": 0.02,
-  "minTokenFeesSol": 3,
+  "minTokenFeesSol": 1,
 
   "avoidPvpSymbols": false,
   "blockPvpSymbols": false,
@@ -66,7 +66,7 @@
   "suspiciousVolumeMaxTokenAgeHours": 96,
   "suspiciousVolumeMinPriceDropPct": -25,
 
-  "minClaimAmount": 3,
+  "minClaimAmount": 0.05,
   "autoSwapAfterClaim": true,
   "outOfRangeBinsToClose": 50,
   "outOfRangeWaitMinutes": 60,
@@ -102,12 +102,12 @@
   "earlyDumpMaxAgeMin": 20,
   "stopLossCooldownHours": 2,
 
-  "takeProfitPct": 25,
+  "takeProfitPct": 8,
   "takeProfitFeePct": 2,
   "minFeePerTvl24h": 4,
   "minAgeBeforeYieldCheck": 60,
   "trailingTakeProfit": true,
-  "trailingTriggerPct": 6,
+  "trailingTriggerPct": 3,
   "trailingDropPct": 3,
   "profitGivebackEmergencyEnabled": true,
   "profitGivebackTriggerPct": 6,

@@ -3,6 +3,9 @@
  * Focused synthetic proof for the nanocap RSI-5m entry surface.
  *
  * Read-only: no network calls, no bot runtime, no deploys/closes, no config writes.
+ * Public examples intentionally avoid proving owner live sizing. Live runtime
+ * config proof belongs in verify-runtime-config.js against the private runtime
+ * config, not user-config.example.json.
  */
 
 import assert from "assert";
@@ -55,12 +58,13 @@ assert.strictEqual(resolved.indicators.requireAllIntervals, false, "single-inter
 assert.strictEqual(resolved.indicators.rsiLength, 2, "live gate uses RSI2 payloads");
 assert.strictEqual(resolved.indicators.rsiOversold, 30, "live gate uses RSI2<=30");
 
-assert.strictEqual(example.deployAmountSol, 1.5, "sizing unchanged: deployAmountSol");
-assert.strictEqual(example.maxPositions, 2, "capital throttle: maxPositions");
-assert.strictEqual(example.maxDeployAmount, 1.55, "sizing unchanged: maxDeployAmount");
-assert.strictEqual(example.stopLossPct, -8, "stop loss unchanged");
-assert.strictEqual(example.hardStopLossPct, -15, "hard stop unchanged");
-assert.strictEqual(example.takeProfitPct, 25, "take profit unchanged");
+assert.strictEqual(example.dryRun, true, "public example defaults to dry-run");
+assert.ok(example.deployAmountSol > 0, "public example includes positive deploy sizing");
+assert.ok(example.maxPositions >= 1, "public example includes a positive max-position cap");
+assert.ok(example.maxDeployAmount >= example.deployAmountSol, "public example maxDeployAmount covers deployAmountSol");
+assert.ok(example.stopLossPct < 0, "public example keeps a negative stop-loss threshold");
+assert.ok(example.hardStopLossPct <= example.stopLossPct, "public example hard stop is no looser than soft stop");
+assert.ok(example.takeProfitPct > 0, "public example keeps a positive take-profit threshold");
 
 const configuredModel = example.llmModel;
 assert.ok(/^deepseek-/i.test(configuredModel), "base LLM model is DeepSeek");

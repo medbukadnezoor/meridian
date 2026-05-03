@@ -9,7 +9,7 @@ This repository supports two common operating lanes:
 | Main Meridian | `experimental` | Larger deployment lane with more conservative screening |
 | Meridian Nanocap | `nanocap-v1` | Lower-market-cap forward-test lane with faster rug/dump exits |
 
-Do not commit `.env`, `user-config.json`, key material, live state, PM2 logs, or config backups. `user-config.example.json` documents intended settings; `user-config.json` is runtime-only.
+Do not commit `.env`, `user-config.json`, key material, live state, PM2 logs, or config backups. `user-config.example.json` is a public schema/sample, not the owner's live settings; `user-config.json` is runtime-only.
 
 ---
 
