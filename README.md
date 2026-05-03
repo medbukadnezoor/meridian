@@ -1,274 +1,179 @@
 # Meridian
 
-**Autonomous Meteora DLMM liquidity management agent for Solana, powered by LLMs.**
+Autonomous Meteora DLMM liquidity management for Solana.
 
----
+Meridian is a configurable agent runner for finding Meteora DLMM pools, opening liquidity positions, monitoring live risk, and closing positions through deterministic safety rules plus LLM-assisted review.
 
-## What it does
+## Branch Guide
 
-- **Screens pools** — continuously scans Meteora DLMM pools against configurable thresholds (fee/TVL ratio, organic score, holder count, market cap, bin step, etc.) to surface high-quality opportunities
-- **Manages positions** — opens, monitors, and closes LP positions autonomously; decides to STAY, CLOSE, or REDEPLOY based on live PnL, yield, and range data
-- **Claims fees** — tracks unclaimed fees per position and claims when thresholds are met
-- **Learns from performance** — studies top LPers, saves structured lessons, ranks candidates with Darwin signal scoring, and runs shadow autoresearch on screening thresholds without mutating live config
-- **Monitors any wallet** — look up open DLMM positions and top LPers for any Solana wallet or pool address
-- **Telegram chat** — full agent chat via Telegram, plus cycle reports and out-of-range alerts sent automatically
+This public repository uses `experimental` as the active public mainline.
 
----
+- `experimental`: current public branch to clone and run if you want the latest Meridian code.
+- `nanocap-v1`: separate nanocap research branch with smaller-cap presets and extra mean-reversion safety experiments.
+- legacy/default branches: older upstream-style code; use them only for historical comparison.
 
-## How it works
+Live owner configuration, wallets, API keys, backups, and exact production sizing are intentionally not included. Start from `user-config.example.json`, copy it to `user-config.json`, and use your own wallet, RPC, keys, thresholds, and risk limits.
 
-Meridian runs a **ReAct agent loop** — each cycle the LLM reasons over live data, calls tools, and acts. Two specialized agents run on independent cron schedules:
+## What It Does
 
-| Agent | Default interval | Role |
-|---|---|---|
-| **Hunter Alpha** | Every 30 min | Pool screening — finds and deploys into the best candidate |
-| **Healer Alpha** | Every 10 min | Position management — evaluates each open position and acts |
+- Screens Meteora DLMM pools using configurable market, liquidity, holder, fee, organic-score, and warning filters.
+- Ranks candidate pools before LLM review, including persisted signal snapshots and Darwin-style performance feedback.
+- Opens and manages DLMM positions through the Meteora DLMM SDK.
+- Tracks open-position PnL, fees, range state, active-bin evidence, and close reasons.
+- Applies deterministic risk exits before or alongside LLM management decisions.
+- Sends Telegram cycle reports and owner-approved command responses when configured.
+- Keeps research and shadow checks read-only until they are explicitly promoted.
 
-A third **health check** runs hourly to summarize portfolio state.
+## Current Safety Features
 
-**Data sources used by the agents:**
-- `@meteora-ag/dlmm` SDK — on-chain position data, active bin, deploy/close transactions
-- Meteora DLMM PnL API — position yield, fee accrual, PnL
-- Wallet RPC — SOL and token balances
-- Pool screening API — fee/TVL ratios, volume, organic scores, holder counts
+The active codebase includes several live-trading hardening layers:
 
-Agents are powered via **OpenRouter** and can be swapped for any compatible model by changing `managementModel` / `screeningModel` in `user-config.json`.
+- Candidate lease guard: manual or automated deploys must match a fresh same-process candidate lease before execution.
+- Screening threshold guard: stale or below-threshold pools are rejected before deploy.
+- Stop-loss policy: soft confirmation, hard stop, early-dump handling, and emergency direct-close paths are configurable.
+- Rolling drawdown exit: closes positions that give back too much from a recent peak.
+- Supertrend loss exit: confirmed bearish trend loss can escalate to an urgent direct close.
+- Relay retry evidence: relay aborts and retry behavior are recorded for diagnosis.
+- PnL snapshot logging: compact JSONL records help inspect MAE/MFE, false stops, and late exits.
+- Active-bin oracle recorder: shadow-only active-bin and velocity evidence collection for future rug/fast-drop exits.
+- Single-sided bid/ask guard: available on the nanocap branch to enforce SOL-only mean-reversion deploy shape.
 
----
+The bot is still trading software. These checks reduce specific known failure modes; they do not remove market, execution, liquidity, RPC, or model risk.
+
+## Architecture
+
+Meridian runs scheduled loops:
+
+| Loop | Purpose |
+|---|---|
+| Screening | Pull pool candidates, apply deterministic filters, rank candidates, and ask the screening model whether to deploy. |
+| Management | Review open positions, PnL, fees, range state, memory, and close/redeploy opportunities. |
+| Fast risk checks | Apply deterministic stop, early-dump, rolling drawdown, and urgent-exit paths without waiting for normal LLM cycles when configured. |
+| Research/shadow | Record evidence for proposed filters without changing live behavior. |
+
+Primary data sources:
+
+- `@meteora-ag/dlmm` SDK for DLMM pool and position interactions.
+- Solana RPC for chain reads and transactions.
+- Pool discovery/screening APIs for candidate metadata.
+- Meteora/LP position PnL APIs where configured.
+- Optional external providers for enrichment, chat, and research.
+
+LLM calls use OpenAI-compatible chat APIs by role. You can route screening, management, and general chat to different providers through config. Local router experiments can also use [CLIProxyAPI](https://github.com/mario-andreschak/CLIProxyAPI), but production routing should be verified with your own endpoint and keys before enabling live decisions.
 
 ## Requirements
 
-- Node.js 18+
-- [OpenRouter](https://openrouter.ai) API key
-- Solana wallet (base58 private key)
-- Telegram bot token (optional, for notifications)
-
----
+- Node.js 20 recommended.
+- Solana RPC endpoint.
+- Solana trading wallet.
+- OpenAI-compatible LLM provider key or local compatible router.
+- Optional Telegram bot token and owner allowlist.
 
 ## Setup
 
-**1. Clone the repo**
+Clone the active branch:
 
 ```bash
-git clone <repo-url>
-cd dlmm-agent
-```
-
-**2. Install dependencies**
-
-```bash
+git clone -b experimental https://github.com/medbukadnezoor/meridian.git
+cd meridian
 npm install
 ```
 
-**3. Create `.env`**
-
-```env
-OPENROUTER_API_KEY=sk-or-...
-WALLET_PRIVATE_KEY=your_base58_private_key
-HELIUS_API_KEY=your_helius_key         # for wallet balance lookups
-TELEGRAM_BOT_TOKEN=123456:ABC...       # optional
-LPAGENT_API_KEY=lpagent_...            # optional, for study_top_lpers / get_top_lpers
-DRY_RUN=true                           # set false for live trading
-```
-
-> **RPC**: defaults to `https://pump.helius-rpc.com` (no key needed). Override with `RPC_URL=` in `.env`.
-
-Optional encrypted `.env` flow:
+Create local secrets and config:
 
 ```bash
-cp .env .env.raw
-printf "replace-with-a-long-local-key\n" > .envrypt
-npm run env:encrypt
-```
-
-Meridian loads envrypt-style encrypted values automatically. This is local env obfuscation, not a substitute for key rotation after exposure. Keep `.env.raw` and `.envrypt` local; both are gitignored.
-
-**4. Copy the example config**
-
-```bash
+cp .env.example .env
 cp user-config.example.json user-config.json
 ```
 
-**5. Run**
+Edit `.env` with your own secrets. Do not commit `.env`, private keys, raw auth headers, shell history, or live backup configs.
+
+Edit `user-config.json` with your own thresholds and risk limits. Keep `dryRun` enabled until you have verified candidate selection, deploy construction, close paths, and Telegram permissions in your own environment.
+
+## Common Config Areas
+
+Most runtime behavior is controlled from `user-config.json`:
+
+| Area | Examples |
+|---|---|
+| Wallet/RPC | `walletKey`, `rpcUrl`, `dryRun` |
+| Sizing | `deployAmountSol`, `maxDeployAmount`, `maxPositions`, `minSolToOpen` |
+| Screening | market-cap range, TVL, volume, holders, organic score, warnings, bin step, fee/TVL thresholds |
+| LLM routing | `screeningModel`, `managementModel`, `generalModel`, base URLs, API keys, fallback models |
+| Entry style | strategy preset, chart-indicator preset, intervals, single-sided deploy guards |
+| Exits | stop loss, hard stop, early dump, take profit, trailing profit, rolling drawdown, trend-loss exits |
+| Logging | PnL snapshots, API activity, decision logs, active-bin oracle files |
+
+Use the example config as a schema guide, not as a recommendation for capital size or thresholds.
+
+## Running
+
+Dry-run first:
 
 ```bash
-npm run dev    # dry run — no on-chain transactions
-npm start      # live mode
+npm run dev
 ```
 
-On startup Meridian fetches your wallet balance, open positions, and the top pool candidates, then begins autonomous cycles immediately.
+Live mode should only be used after you understand the code paths, config, wallet permissions, and failure modes:
 
----
-
-## Config reference
-
-All fields are optional — defaults shown. Edit `user-config.json`.
-
-| Field | Default | Description |
-|---|---|---|
-| `walletKey` | — | Base58-encoded private key of the trading wallet |
-| `rpcUrl` | — | Solana RPC endpoint URL |
-| `dryRun` | `true` | Simulate all transactions without submitting |
-| `deployAmountSol` | `0.5` | SOL to deploy per new position |
-| `maxPositions` | `3` | Maximum concurrent open positions |
-| `minSolToOpen` | `0.07` | Minimum wallet SOL balance before opening a new position |
-| `managementIntervalMin` | `10` | How often the management agent runs (minutes) |
-| `screeningIntervalMin` | `30` | How often the screening agent runs (minutes) |
-| `managementModel` | `openrouter/healer-alpha` | LLM model for position management |
-| `screeningModel` | `openrouter/hunter-alpha` | LLM model for pool screening |
-| `generalModel` | `openrouter/healer-alpha` | LLM model for REPL chat and `/learn` |
-| `minFeeActiveTvlRatio` | `0.05` | Minimum fee/active-TVL ratio (5%) |
-| `minTvl` | `10000` | Minimum pool TVL in USD |
-| `maxTvl` | `150000` | Maximum pool TVL in USD |
-| `minOrganic` | `65` | Minimum organic score (0–100) |
-| `minHolders` | `500` | Minimum token holder count |
-| `timeframe` | `5m` | Candle timeframe used in screening |
-| `category` | `trending` | Pool category filter for screening |
-| `takeProfitPct` | `5` | Close position when PnL reaches this % threshold |
-| `outOfRangeWaitMinutes` | `30` | Minutes a position can be out of range before alerting / acting |
-| `outOfRangeHardCloseMinutes` | `null` | Optional hard OOR cap that bypasses indicator confirmation once reached |
-
----
-
-## REPL commands
-
-After startup, an interactive prompt is available. The prompt shows a live countdown to the next management and screening cycle.
-
+```bash
+npm start
 ```
-[manage: 8m 12s | screen: 24m 3s]
->
-```
+
+For long-running use, run under a process manager such as PM2 or systemd. Keep each bot instance in its own directory, branch, wallet, logs, and config.
+
+## Commands
+
+When the interactive prompt is enabled:
 
 | Command | Description |
 |---|---|
-| `1`, `2`, `3` ... | Deploy into that numbered pool from the current candidates list |
-| `auto` | Let the agent pick the best pool and deploy automatically |
-| `/status` | Refresh and display wallet balance and open positions |
-| `/candidates` | Re-screen and display the current top pool candidates |
-| `/learn` | Study top LPers across all current candidate pools and save lessons |
-| `/learn <pool_address>` | Study top LPers from a specific pool address |
-| `<wallet_address>` | Ask the agent to check any wallet's positions or a pool's top LPers |
-| `/thresholds` | Show current screening thresholds and closed-position performance stats |
-| `/autoresearch` | Show shadow autoresearch trials and whether any threshold changes look promising |
-| `/evolve` | Trigger threshold evolution from performance data (requires 5+ closed positions) |
-| `/stop` | Graceful shutdown |
-| `<anything else>` | Free-form chat — ask the agent questions, request actions, analyze pools |
+| `/status` | Refresh wallet and open-position state. |
+| `/candidates` | Run the screening pipeline and show current candidates. |
+| `/thresholds` | Show active screening thresholds and recent performance memory. |
+| `/autoresearch` | Show shadow research trials. |
+| `/learn` | Study candidate pools and update local lessons where supported. |
+| `/stop` | Graceful shutdown. |
 
-Free-form chat persists session history (last 10 exchanges), so you can have a continuous conversation: `"what do you think of pool #2?"`, `"close all positions"`, `"how much have we earned today?"`.
+Telegram can expose similar control if configured, but inbound commands require explicit chat and user allowlists.
 
----
+## Logs And Evidence
 
-## Telegram
+Useful local artifacts include:
 
-**Setup:**
+- `logs/api-activity-YYYY-MM-DD.jsonl`
+- `logs/decision-log-YYYY-MM-DD.jsonl`
+- `logs/pnl-snapshots-YYYY-MM-DD.jsonl`
+- `logs/active-bin-oracle-YYYY-MM-DD.jsonl`
+- `pool-memory.json`
+- `state.json`
 
-1. Create a bot via [@BotFather](https://t.me/BotFather) and copy the token
-2. Add `TELEGRAM_BOT_TOKEN=<token>` to your `.env`
-3. Set the exact Telegram chat and allowed controller user IDs in `.env`
+Do not publish production logs unless you have scrubbed wallet addresses, position addresses, auth-bearing URLs, private API responses, and strategy-sensitive configuration.
 
-Meridian no longer auto-registers the first chat for safety. You must set:
+## Verification
 
-```env
-TELEGRAM_BOT_TOKEN=<token>
-TELEGRAM_CHAT_ID=<target chat id>
-TELEGRAM_ALLOWED_USER_IDS=<comma-separated Telegram user ids allowed to control the bot>
-```
-
-Security notes:
-- If `TELEGRAM_CHAT_ID` is not set, inbound Telegram control is ignored.
-- If the target chat is a group/supergroup and `TELEGRAM_ALLOWED_USER_IDS` is empty, inbound control is ignored.
-- Notifications still go to the configured chat, but command/control is limited to the allowed user IDs.
-
-**Notifications sent:**
-- After every management cycle: full agent report (reasoning + decisions)
-- After every screening cycle: full agent report (what it found, whether it deployed)
-- When a position goes out of range past `outOfRangeWaitMinutes`
-- When a position reaches `outOfRangeHardCloseMinutes`, the bot escalates to a hard OOR close path and skips indicator vetoes
-- On deploy: pair, amount, position address, tx hash
-- On close: pair and PnL
-
-You can also chat with the agent via Telegram using the same free-form interface as the REPL: `"check wallet 7tB8..."`, `"who are the top LPers in pool ABC..."`, `"close all positions"`, etc. Only explicitly allowed Telegram user IDs can issue commands.
-
----
-
-## How it learns
-
-Meridian accumulates structured knowledge in `lessons.json` with two components:
-
-### Lessons (`/learn`)
-
-Running `/learn` triggers the agent to call `study_top_lpers` on each top candidate pool. It analyzes the on-chain behavior of the best-performing LPs in those pools — hold duration, entry/exit timing, scalping vs. holding patterns, win rates — and saves 4–8 concrete, actionable lessons. Cross-pool patterns are weighted more heavily since they generalize better.
-
-Saved lessons are injected into subsequent agent cycles as part of the system context, improving decision quality over time.
-
-### Threshold evolution (`/evolve`)
-
-After at least 5 positions have been closed, `/evolve` analyzes the performance record (win rate, average PnL, fee yields) and adjusts the screening thresholds in `user-config.json` accordingly. Changes take effect immediately — no restart needed. The rationale for each change is printed to the console.
-
-Use `/thresholds` to see current values alongside performance stats.
-
-### Darwin ranking
-
-Screening now persists the deploy-time signal snapshot in `state.json`, recalculates direction-aware Darwin weights, and ranks the candidate shortlist before the screener model makes the final deploy call. Darwin is a ranking aid, not a hard deploy rule.
-
-### Shadow autoresearch (`/autoresearch`)
-
-Shadow autoresearch evaluates counterfactual screening rules such as tighter organic, volume, ATH, and token-age filters against recent closes. It keeps its own `autoresearch-state.json` plus JSONL logs under `logs/`, and in shadow mode it never mutates live config. The goal is to surface profit-improving changes without destabilizing the live runner.
-
----
-
-## Hive Mind (optional)
-
-Meridian includes an **opt-in** collective intelligence system called **Hive Mind**. When enabled, your agent anonymously shares what it learns (lessons, deploy outcomes, screening thresholds) with other meridian agents and receives crowd wisdom in return.
-
-**What you get:**
-- Pool consensus from other agents — "8 agents deployed here, 72% win rate"
-- Strategy rankings — which strategies actually work across all agents
-- Pattern consensus — what works at different volatility levels
-- Threshold medians — what screening settings other agents have evolved to
-
-**What you share:**
-- Lessons from `lessons.json`
-- Deploy outcomes from `pool-memory.json` (pool address, strategy, PnL, hold time)
-- Screening thresholds from `user-config.json`
-- **NO wallet addresses, private keys, or SOL balances are ever sent**
-
-**Impact:** 1 non-blocking API call per screening cycle (~200ms), 1 fire-and-forget POST on position close. If the hive is down, your agent doesn't notice.
-
-### Setup
-
-**1. Get the registration token** from the private Telegram discussion.
-
-**2. Register your agent**
+Before pushing or deploying code changes, run the repository verifier:
 
 ```bash
-node -e "import('./hive-mind.js').then(m => m.register('https://meridian-hive-api-production.up.railway.app', 'YOUR_TOKEN'))"
+node scripts/verify-patches.js
 ```
 
-Replace `YOUR_TOKEN` with the registration token from Telegram.
+Some features also have focused verifiers under `scripts/verify-*.js`. Run the focused verifier for the feature you changed, then run the full verifier.
 
-This automatically saves your credentials to `user-config.json`. **Save the API key printed in the terminal** — it will not be shown again.
+## Nanocap Branch
 
-**3. Done.** No restart needed. Your agent will sync on every position close and query the hive during screening.
+The `nanocap-v1` branch is a separate research lane for smaller-cap mean-reversion behavior. It may contain stricter deploy-shape guards, different screening defaults, additional runtime proof scripts, and higher-churn experiments than `experimental`.
 
-### Disable
+Use it only if you specifically want to study that lane. Keep its wallet, config, and process isolated from any main bot instance.
 
-Clear both fields in `user-config.json`:
-```json
-{
-  "hiveMindUrl": "",
-  "hiveMindApiKey": ""
-}
-```
+## Privacy And Security
 
-### Self-hosting
-
-You can run your own hive server instead of using the public one. See [meridian-hive](https://github.com/fciaf420/meridian-hive) for the server source code.
-
----
+- Never commit `.env`, `user-config.json`, private keys, API keys, raw auth headers, Telegram tokens, VPS backups, or live wallet material.
+- Prefer `env:NAME` config references for API keys where supported.
+- Treat logs as sensitive until scrubbed.
+- Rotate any key or token that has ever been pasted into a public place.
+- Public examples intentionally omit exact live thresholds, wallet addresses, and production sizing.
 
 ## Disclaimer
 
-This software is provided as-is, with no warranty. Running an autonomous trading agent carries real financial risk — you can lose funds. Always start with `npm run dev` (dry run) to verify behavior before going live. Never deploy more capital than you can afford to lose. This is not financial advice.
-
-The authors are not responsible for any losses incurred through use of this software.
+This software is provided as-is, with no warranty. Autonomous liquidity management and memecoin/nanocap trading can lose funds quickly. Start in dry-run mode, use small size, inspect every configured exit path, and never deploy capital you cannot afford to lose. This is not financial advice.
