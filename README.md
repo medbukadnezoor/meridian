@@ -69,6 +69,45 @@ LLM calls use OpenAI-compatible chat APIs by role. You can route screening, mana
 - OpenAI-compatible LLM provider key or local compatible router.
 - Optional Telegram bot token and owner allowlist.
 
+## Services And Keys
+
+Minimum live setup:
+
+| Service | Key or Config | Required | What Happens If Missing |
+|---|---|---|---|
+| Solana RPC | `RPC_URL` or `rpcUrl` | Yes | Chain reads and transactions fail. |
+| Trading wallet | `WALLET_PRIVATE_KEY` or `walletKey` | Yes for live | Bot can run read-only/status poorly, but cannot deploy or close. |
+| LLM provider | role API keys such as `DEEPSEEK_API_KEY`, `OPENROUTER_API_KEY`, or `LLM_API_KEY` | Yes for agent decisions | Screening/management chat calls fail; deterministic exits can still run where no LLM is needed. |
+| Telegram | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `TELEGRAM_ALLOWED_USER_IDS` | No | Bot runs without Telegram control or notifications. |
+
+Optional services:
+
+| Service | Key or Config | Toggle | Behavior |
+|---|---|---|---|
+| Agent Meridian relay | `agentMeridianApiUrl`, `publicApiKey`, `lpAgentRelayEnabled` | `lpAgentRelayEnabled` | If enabled, open-position reads try Agent Meridian first. Normal non-urgent closes may try relay zap-out first. If relay fails before submit, the bot falls back. |
+| LPAgent direct | `LPAGENT_API_KEY` | key presence | Used as an open-position/PnL fallback after relay failure, or as supplemental PnL data after Meteora discovery. If missing, this layer is skipped. |
+| Meteora APIs | none | always used | Final open-position fallback is Meteora portfolio plus Meteora DLMM PnL APIs. Pool search/discovery also uses Meteora endpoints. |
+| GMGN enrichment | `GMGN_API_KEY` | key presence | Adds top-holder/trader risk signals for screening and Darwin context. If missing or failing, GMGN returns `null` and screening continues. |
+| OKX enrichment | `OKX_API_KEY`, `OKX_SECRET_KEY`, `OKX_PASSPHRASE`, optional `OKX_PROJECT_ID` | key presence | If OKX keys are present, direct OKX signed requests are used. Without keys, the bot may try Agent Meridian OKX enrichment and public OKX-style calls; failures are logged as unavailable and screening continues. |
+| Discord signal candidates | Agent Meridian API config | `useDiscordSignals`, `discordSignalMode` | Disabled by default. If enabled, fetch failures are logged and normal discovery continues unless you configure signal-only behavior. |
+| HiveMind | `hiveMindUrl`, `hiveMindApiKey`, `agentId`, `hiveMindPullMode` | non-empty URL/key | Disabled in the public example. If configured, shares/pulls aggregate lessons and presets. |
+| Jupiter | `JUPITER_API_KEY` | key presence | Optional for swap-related helpers; the code has a public fallback key/path, but serious live use should provide your own. |
+
+Open-position source order:
+
+1. If `lpAgentRelayEnabled=true`, try Agent Meridian relay.
+2. If relay fails and `LPAGENT_API_KEY` exists, try LPAgent.io direct.
+3. Fall back to Meteora portfolio and Meteora DLMM PnL APIs.
+4. Returned positions are filtered by on-chain wallet owner before management uses them.
+
+Close path order:
+
+1. Urgent closes skip relay and use the local close-liquidity-first path.
+2. Non-urgent closes may try Agent Meridian relay zap-out when `lpAgentRelayEnabled=true`.
+3. If relay fails before submit, the bot falls back to local Meteora close plus swap/autoswap helpers where configured.
+
+The public `user-config.example.json` keeps relay, HiveMind, and live-size assumptions off by default so a fresh clone does not depend on owner-only services.
+
 ## Setup
 
 Clone the active branch:
