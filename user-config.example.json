@@ -166,13 +166,13 @@
   "autoresearchEnabled": false,
 
   "telegramChatId": "YOUR_TELEGRAM_CHAT_ID",
-  "hiveMindUrl": "https://api.agentmeridian.xyz",
-  "hiveMindApiKey": "YOUR_HIVEMIND_API_KEY",
-  "hiveMindPullMode": "disabled",
-  "agentId": "YOUR_AGENT_ID",
-  "publicApiKey": "YOUR_PUBLIC_API_KEY",
-  "agentMeridianApiUrl": "https://api.agentmeridian.xyz/api",
-  "lpAgentRelayEnabled": true,
+  "hiveMindUrl": "",
+  "hiveMindApiKey": "",
+  "hiveMindPullMode": "manual",
+  "agentId": "",
+  "publicApiKey": "",
+  "agentMeridianApiUrl": "",
+  "lpAgentRelayEnabled": false,
 
   "chartIndicators": {
     "enabled": true,
