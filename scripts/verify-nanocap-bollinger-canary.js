@@ -3,9 +3,6 @@
  * Focused synthetic proof for the nanocap RSI-5m entry surface.
  *
  * Read-only: no network calls, no bot runtime, no deploys/closes, no config writes.
- * Public examples intentionally avoid proving owner live sizing. Live runtime
- * config proof belongs in verify-runtime-config.js against the private runtime
- * config, not user-config.example.json.
  */
 
 import assert from "assert";
@@ -58,20 +55,26 @@ assert.strictEqual(resolved.indicators.requireAllIntervals, false, "single-inter
 assert.strictEqual(resolved.indicators.rsiLength, 2, "live gate uses RSI2 payloads");
 assert.strictEqual(resolved.indicators.rsiOversold, 30, "live gate uses RSI2<=30");
 
-assert.strictEqual(example.dryRun, true, "public example defaults to dry-run");
-assert.ok(example.deployAmountSol > 0, "public example includes positive deploy sizing");
-assert.ok(example.maxPositions >= 1, "public example includes a positive max-position cap");
-assert.ok(example.maxDeployAmount >= example.deployAmountSol, "public example maxDeployAmount covers deployAmountSol");
-assert.ok(example.stopLossPct < 0, "public example keeps a negative stop-loss threshold");
-assert.ok(example.hardStopLossPct <= example.stopLossPct, "public example hard stop is no looser than soft stop");
-assert.ok(example.takeProfitPct > 0, "public example keeps a positive take-profit threshold");
+assert.strictEqual(example.dryRun, true, "public example stays dry-run by default");
+assert.ok(example.deployAmountSol <= 0.25, "public example does not publish live deploy sizing");
+assert.ok(example.maxPositions <= 1, "public example keeps conservative position cap");
+assert.ok(example.maxDeployAmount <= 0.3, "public example does not publish live max deploy sizing");
+assert.strictEqual(example.stopLossPct, -8, "stop loss unchanged");
+assert.strictEqual(example.hardStopLossPct, -15, "hard stop unchanged");
+assert.ok(example.takeProfitPct > 0, "public example keeps a positive take-profit setting");
 
 const configuredModel = example.llmModel;
 assert.ok(/^deepseek-/i.test(configuredModel), "base LLM model is DeepSeek");
-assert.strictEqual(example.screeningModel, configuredModel, "screening model follows configured base model");
+assert.strictEqual(example.screeningModel, "deepseek-v4-pro", "screening model uses DeepSeek V4 Pro");
 assert.strictEqual(example.managementModel, configuredModel, "management model follows configured base model");
 assert.strictEqual(example.generalModel, configuredModel, "general model follows configured base model");
-assert.strictEqual(resolved.llm.screeningModel, configuredModel, "resolved screening model follows config");
+assert.strictEqual(example.screeningThinkingEnabled, true, "screening thinking is enabled");
+assert.strictEqual(example.screeningReasoningEffort, "high", "screening reasoning effort is high");
+assert.strictEqual(example.screeningRequestTimeoutMs, 90000, "screening request timeout is 90 seconds");
+assert.strictEqual(resolved.llm.screeningModel, "deepseek-v4-pro", "resolved screening model follows Pro config");
+assert.strictEqual(resolved.llm.screeningThinkingEnabled, true, "resolved screening thinking follows config");
+assert.strictEqual(resolved.llm.screeningReasoningEffort, "high", "resolved screening reasoning follows config");
+assert.strictEqual(resolved.llm.screeningRequestTimeoutMs, 90000, "resolved screening timeout follows config");
 assert.strictEqual(resolved.llm.managementModel, configuredModel, "resolved management model follows config");
 assert.strictEqual(resolved.llm.generalModel, configuredModel, "resolved general model follows config");
 

@@ -505,6 +505,8 @@ function buildChecks() {
       label: "[CLIProxy] SCREENER sends and logs explicit Chat Completions reasoning_effort",
       test: (src) =>
         src.includes("reasoningEffort: llmCfg.screeningReasoningEffort || null") &&
+        src.includes('thinkingType: llmCfg.screeningThinkingEnabled ? "enabled" : "disabled"') &&
+        src.includes("timeout: route.requestTimeoutMs || 5 * 60 * 1000") &&
         src.includes("callParams.reasoning_effort = activeRoute.reasoningEffort") &&
         src.includes("reasoning_effort: activeRoute.reasoningEffort || null"),
     },
@@ -620,10 +622,12 @@ function buildChecks() {
       file: "scripts/verify-runtime-config.js",
       label: "[CLIProxy] runtime config proof masks role routes and provider-param policy",
       test: () =>
-        exampleProof?.llm?.screeningModel === "deepseek-v4-flash" &&
+        exampleProof?.llm?.screeningModel === "deepseek-v4-pro" &&
         exampleProof?.llm?.screeningBaseUrl === "https://api.deepseek.com" &&
         exampleProof?.llm?.screeningApiKeySet === "not_set" &&
-        exampleProof?.llm?.screeningReasoningEffort === null &&
+        exampleProof?.llm?.screeningThinkingEnabled === true &&
+        exampleProof?.llm?.screeningReasoningEffort === "high" &&
+        exampleProof?.llm?.screeningRequestTimeoutMs === 90000 &&
         exampleProof?.llm?.screeningFallbackModel === null &&
         exampleProof?.llm?.screeningFallbackBaseUrl === null &&
         exampleProof?.llm?.screeningFallbackApiKeySet === "not_set" &&
@@ -1167,30 +1171,30 @@ function buildChecks() {
     },
     {
       file: "user-config.example.json",
-      label: "[Runtime] nanocap public example resolves emergency stop feature wiring without owner sizing",
+      label: "[Runtime] nanocap example resolves post-LARP -8/-10/-15 emergency stop config",
       test: () =>
         exampleProof.userConfigExists === true &&
-        Number(exampleProof?.management?.stopLossPct) < 0 &&
-        Number(exampleProof?.management?.stopLossConfirmDelayMs) >= 0 &&
-        Number(exampleProof?.management?.hardStopLossPct) <= Number(exampleProof?.management?.stopLossPct) &&
-        Number(exampleProof?.management?.stopLossFastClosePct) <= Number(exampleProof?.management?.stopLossPct) &&
-        Number(exampleProof?.management?.stopLossVelocityWindowMs) > 0 &&
-        Number(exampleProof?.management?.stopLossVelocityClosePct) < 0 &&
+        Number(exampleProof?.management?.stopLossPct) === -8 &&
+        Number(exampleProof?.management?.stopLossConfirmDelayMs) === 15000 &&
+        Number(exampleProof?.management?.hardStopLossPct) === -15 &&
+        Number(exampleProof?.management?.stopLossFastClosePct) === -10 &&
+        Number(exampleProof?.management?.stopLossVelocityWindowMs) === 90000 &&
+        Number(exampleProof?.management?.stopLossVelocityClosePct) === -3 &&
         exampleProof?.management?.rollingDrawdownExitEnabled === true &&
-        Number(exampleProof?.management?.rollingDrawdownWindowMs) > 0 &&
-        Number(exampleProof?.management?.rollingDrawdownMinPeakPct) > 0 &&
-        Number(exampleProof?.management?.rollingDrawdownCurrentPnlPct) < 0 &&
-        Number(exampleProof?.management?.rollingDrawdownMinDropPct) > 0 &&
-        Number(exampleProof?.management?.earlyDumpPct) < 0 &&
-        Number(exampleProof?.management?.earlyDumpMaxAgeMin) > 0 &&
-        Number(exampleProof?.management?.trailingTriggerPct) > 0 &&
+        Number(exampleProof?.management?.rollingDrawdownWindowMs) === 5400000 &&
+        Number(exampleProof?.management?.rollingDrawdownMinPeakPct) === 1 &&
+        Number(exampleProof?.management?.rollingDrawdownCurrentPnlPct) === -2 &&
+        Number(exampleProof?.management?.rollingDrawdownMinDropPct) === 4 &&
+        Number(exampleProof?.management?.earlyDumpPct) === -8 &&
+        Number(exampleProof?.management?.earlyDumpMaxAgeMin) === 20 &&
+        Number(exampleProof?.management?.trailingTriggerPct) === 6 &&
         exampleProof?.management?.profitGivebackEmergencyEnabled === true &&
-        Number(exampleProof?.management?.profitGivebackTriggerPct) > 0 &&
-        Number(exampleProof?.management?.profitGivebackFloorPct) >= 0 &&
+        Number(exampleProof?.management?.profitGivebackTriggerPct) === 6 &&
+        Number(exampleProof?.management?.profitGivebackFloorPct) === 2 &&
         exampleProof?.management?.supertrendLossExitEnabled === true &&
-        Number(exampleProof?.management?.supertrendLossExitPnlPct) < 0 &&
+        Number(exampleProof?.management?.supertrendLossExitPnlPct) === -4 &&
         exampleProof?.management?.supertrendLossExitInterval === "15_MINUTE" &&
-        Number(exampleProof?.management?.supertrendLossExitConfirmChecks) >= 1 &&
+        Number(exampleProof?.management?.supertrendLossExitConfirmChecks) === 2 &&
         exampleProof?.management?.pnlSnapshotLoggingEnabled === true &&
         exampleProof?.management?.pnlSnapshotBotName === "nanocap",
     },
@@ -1263,10 +1267,10 @@ function buildChecks() {
     },
     {
       file: "user-config.example.json",
-      label: "[Runtime] nanocap public example resolves expanded Meteora discovery recall fields",
+      label: "[Runtime] nanocap example resolves expanded Meteora discovery recall",
       test: () =>
         exampleProof.userConfigExists === true &&
-        Number(exampleProof?.screening?.discoveryPageSize) >= 50 &&
+        Number(exampleProof?.screening?.discoveryPageSize) === 100 &&
         Array.isArray(exampleProof?.screening?.discoveryExtraCategories) &&
         exampleProof.screening.discoveryExtraCategories.includes("new") &&
         exampleProof?.screening?.excludeHighSingleOwnership === false,
