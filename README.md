@@ -1,218 +1,455 @@
-# Meridian
+# Meridian DLMM Agent
 
-Autonomous Meteora DLMM liquidity management for Solana.
+Autonomous Meteora DLMM liquidity management for Solana. Meridian screens pools, opens positions, monitors live PnL/range/yield, exits risk events, learns from closed trades, and reports through Telegram.
 
-Meridian is a configurable agent runner for finding Meteora DLMM pools, opening liquidity positions, monitoring live risk, and closing positions through deterministic safety rules plus LLM-assisted review.
+This repository supports two common operating lanes:
 
-## Branch Guide
+| Lane | Typical Branch | Purpose |
+|---|---|---|
+| Main Meridian | `experimental` | Larger deployment lane with more conservative screening |
+| Meridian Nanocap | `nanocap-v1` | Lower-market-cap forward-test lane with faster rug/dump exits |
 
-This public repository uses `experimental` as the active public mainline.
+Do not commit `.env`, `user-config.json`, key material, live state, PM2 logs, or config backups. `user-config.example.json` documents intended settings; `user-config.json` is runtime-only.
 
-- `experimental`: current public branch to clone and run if you want the latest Meridian code.
-- `nanocap-v1`: separate nanocap research branch with smaller-cap presets and extra mean-reversion safety experiments.
-- legacy/default branches: older upstream-style code; use them only for historical comparison.
+---
 
-Live owner configuration, wallets, API keys, backups, and exact production sizing are intentionally not included. Start from `user-config.example.json`, copy it to `user-config.json`, and use your own wallet, RPC, keys, thresholds, and risk limits.
+## Current Capabilities
 
-## What It Does
+- **Meteora pool discovery** with hard prefilters before LLM: market cap, TVL, volume, holders, bin step, organic score, warnings, ownership flags, category, timeframe, and page size.
+- **Nanocap expanded discovery**: supports configurable page size, extra categories such as `new`, and optional high-single-ownership exclusion.
+- **Chart-gated entries**: RSI/Bollinger/Supertrend presets can confirm entries before the screener spends LLM calls.
+- **LLM screener**: reviews eligible candidates, memory, GMGN/OKX/security signals, and decides deploy/no-deploy.
+- **Deterministic dump protection**: hard stop, fast stop, velocity stop, early-dump stop, confirmed soft stop, and PnL snapshots.
+- **Direct emergency exits**: urgent stop-loss paths bypass LLM and close directly.
+- **Position management**: deterministic rules for stop loss, low yield, out-of-range, claims, trailing take-profit, operator notes, and instructions.
+- **Darwin scoring**: learns from material closed outcomes and ranks candidates before final screener choice.
+- **Material win metrics**: separates Raw WR, Material WR, neutral dust/operator closes, and Darwin material learning.
+- **GMGN enrichment**: checks top holders, bot holders, bundle/sniper exposure, bluechip holders, global fees, and suspicious wallets.
+- **Falling-knife and suspicious-volume vetoes**: deterministic pre-LLM filters for obvious dump/rug-like setups.
+- **Range guard**: rejects tiny or malformed single-sided ranges and audits raw/normalized deploy ranges.
+- **Relay hardening**: Agent Meridian relay first, LPAgent direct fallback, Meteora fallback, ownership guard, and retry-aware abort handling.
+- **Telegram operations**: reports, `/setcfg`, `/screen`, `/positions`, settings menus, free-form operator requests, and live tool progress.
+- **CLIProxyAPI routing**: SCREENER, GENERAL, and MANAGEMENT can use a VPS-local [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) OpenAI-compatible router. GENERAL/MANAGEMENT are dense non-reasoning routes.
 
-- Screens Meteora DLMM pools using configurable market, liquidity, holder, fee, organic-score, and warning filters.
-- Ranks candidate pools before LLM review, including persisted signal snapshots and Darwin-style performance feedback.
-- Opens and manages DLMM positions through the Meteora DLMM SDK.
-- Tracks open-position PnL, fees, range state, active-bin evidence, and close reasons.
-- Applies deterministic risk exits before or alongside LLM management decisions.
-- Sends Telegram cycle reports and owner-approved command responses when configured.
-- Keeps research and shadow checks read-only until they are explicitly promoted.
-
-## Current Safety Features
-
-The active codebase includes several live-trading hardening layers:
-
-- Candidate lease guard: manual or automated deploys must match a fresh same-process candidate lease before execution.
-- Screening threshold guard: stale or below-threshold pools are rejected before deploy.
-- Stop-loss policy: soft confirmation, hard stop, early-dump handling, and emergency direct-close paths are configurable.
-- Rolling drawdown exit: closes positions that give back too much from a recent peak.
-- Supertrend loss exit: confirmed bearish trend loss can escalate to an urgent direct close.
-- Relay retry evidence: relay aborts and retry behavior are recorded for diagnosis.
-- PnL snapshot logging: compact JSONL records help inspect MAE/MFE, false stops, and late exits.
-- Active-bin oracle recorder: shadow-only active-bin and velocity evidence collection for future rug/fast-drop exits.
-- Single-sided bid/ask guard: available on the nanocap branch to enforce SOL-only mean-reversion deploy shape.
-
-The bot is still trading software. These checks reduce specific known failure modes; they do not remove market, execution, liquidity, RPC, or model risk.
+---
 
 ## Architecture
 
-Meridian runs scheduled loops:
+Meridian is a ReAct-style agent system with deterministic policy gates wrapped around LLM decisions.
 
-| Loop | Purpose |
+| Role | What It Does | Typical Trigger |
+|---|---|---|
+| `SCREENER` | Reviews candidate pools and may deploy | Screening cron or deploy-like Telegram command |
+| `MANAGER` | Executes close/claim/instruction actions when deterministic policy says action is needed | Management cron only when action is needed |
+| `GENERAL` | Operator chat, reports, manual research, status, explanations | Free-form Telegram or REPL |
+
+Management cycles run on a schedule, but the MANAGER LLM is skipped when all positions are deterministic `STAY`. Urgent stop-loss exits bypass MANAGER entirely and close directly.
+
+Core files:
+
+| File | Purpose |
 |---|---|
-| Screening | Pull pool candidates, apply deterministic filters, rank candidates, and ask the screening model whether to deploy. |
-| Management | Review open positions, PnL, fees, range state, memory, and close/redeploy opportunities. |
-| Fast risk checks | Apply deterministic stop, early-dump, rolling drawdown, and urgent-exit paths without waiting for normal LLM cycles when configured. |
-| Research/shadow | Record evidence for proposed filters without changing live behavior. |
+| `index.js` | Cron cycles, Telegram routing, PnL poller, management/screening orchestration |
+| `agent.js` | Per-role LLM routes, tool selection, ReAct loop, API activity logging |
+| `config-builder.js` | Runtime config assembly from `user-config.json` |
+| `tools/screening.js` | Meteora discovery, candidate filters, chart indicator confirmation |
+| `tools/dlmm.js` | Deploy/close/position/PnL logic |
+| `stop-loss-policy.js` | Hard, fast, velocity, and confirmed stop-loss decisions |
+| `state.js` | Position registry, PnL history, trailing TP, early dump logic |
+| `tools/executor.js` | Tool dispatcher and operator-only config mutation gate |
+| `pool-memory.js` | Pool performance memory and cooldowns |
+| `signal-weights.js` | Darwin signal weighting |
 
-Primary data sources:
+---
 
-- `@meteora-ag/dlmm` SDK for DLMM pool and position interactions.
-- Solana RPC for chain reads and transactions.
-- Pool discovery/screening APIs for candidate metadata.
-- Meteora/LP position PnL APIs where configured.
-- Optional external providers for enrichment, chat, and research.
+## Nanocap Configuration Shape
 
-LLM calls use OpenAI-compatible chat APIs by role. You can route screening, management, and general chat to different providers through config. Local router experiments can also use [CLIProxyAPI](https://github.com/mario-andreschak/CLIProxyAPI), but production routing should be verified with your own endpoint and keys before enabling live decisions.
+Nanocap is the aggressive forward-test lane for low market cap mean reversion. Keep exact live values in private runtime config, not in public docs. A typical config shape looks like this:
 
-## Requirements
+```json
+{
+  "preset": "nanocap_mean_reversion",
+  "deployAmountSol": "<per-position size>",
+  "maxPositions": "<concurrent-position cap>",
+  "maxDeployAmount": "<single-deploy safety cap>",
 
-- Node.js 20 recommended.
-- Solana RPC endpoint.
-- Solana trading wallet.
-- OpenAI-compatible LLM provider key or local compatible router.
-- Optional Telegram bot token and owner allowlist.
+  "minMcap": "<lower market-cap bound>",
+  "maxMcap": "<upper market-cap bound>",
+  "minTvl": "<minimum TVL>",
+  "maxTvl": "<maximum TVL>",
+  "minVolume": "<minimum recent volume>",
+  "minHolders": "<minimum holders>",
+  "minBinStep": "<minimum bin step>",
+  "maxBinStep": "<maximum bin step>",
+  "minFeeActiveTvlRatio": "<minimum fee/active-TVL ratio>",
+  "discoveryPageSize": "<candidate page size>",
+  "discoveryExtraCategories": ["new"],
+  "excludeHighSingleOwnership": "<true-or-false>",
 
-## Services And Keys
+  "entryPreset": "rsi_reversal",
+  "indicatorIntervals": ["<entry interval>"],
+  "rsiLength": "<RSI length>",
+  "rsiOversold": "<oversold threshold>",
+  "requireAllIntervals": "<true-or-false>",
 
-Minimum live setup:
+  "stopLossPct": "<confirmed soft-stop pct>",
+  "stopLossConfirmDelayMs": "<confirmation delay>",
+  "hardStopLossPct": "<immediate hard-stop pct>",
+  "stopLossFastClosePct": "<immediate fast-stop pct>",
+  "stopLossVelocityWindowMs": "<velocity window>",
+  "stopLossVelocityClosePct": "<velocity drop pct>",
+  "earlyDumpPct": "<new-position dump pct>",
+  "earlyDumpMaxAgeMin": "<early-dump age window>",
 
-| Service | Key or Config | Required | What Happens If Missing |
-|---|---|---|---|
-| Solana RPC | `RPC_URL` or `rpcUrl` | Yes | Chain reads and transactions fail. |
-| Trading wallet | `WALLET_PRIVATE_KEY` or `walletKey` | Yes for live | Bot can run read-only/status poorly, but cannot deploy or close. |
-| LLM provider | role API keys such as `DEEPSEEK_API_KEY`, `OPENROUTER_API_KEY`, or `LLM_API_KEY` | Yes for agent decisions | Screening/management chat calls fail; deterministic exits can still run where no LLM is needed. |
-| Telegram | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `TELEGRAM_ALLOWED_USER_IDS` | No | Bot runs without Telegram control or notifications. |
+  "takeProfitPct": "<take-profit pct>",
+  "trailingTakeProfit": true,
+  "trailingTriggerPct": "<trail activation pct>",
+  "trailingDropPct": "<trail giveback pct>",
+  "profitGivebackEmergencyEnabled": "<true-or-false>",
+  "profitGivebackTriggerPct": "<minimum confirmed peak pct>",
+  "profitGivebackFloorPct": "<emergency current-PnL floor pct>",
 
-Optional services:
+  "screeningModel": "<screener model>",
+  "screeningBaseUrl": "<OpenAI-compatible base URL>",
+  "screeningReasoningEffort": "<optional screener reasoning effort>",
 
-| Service | Key or Config | Toggle | Behavior |
-|---|---|---|---|
-| Agent Meridian relay | `agentMeridianApiUrl`, `publicApiKey`, `lpAgentRelayEnabled` | `lpAgentRelayEnabled` | If enabled, open-position reads try Agent Meridian first. Normal non-urgent closes may try relay zap-out first. If relay fails before submit, the bot falls back. |
-| LPAgent direct | `LPAGENT_API_KEY` | key presence | Used as an open-position/PnL fallback after relay failure, or as supplemental PnL data after Meteora discovery. If missing, this layer is skipped. |
-| Meteora APIs | none | always used | Final open-position fallback is Meteora portfolio plus Meteora DLMM PnL APIs. Pool search/discovery also uses Meteora endpoints. |
-| GMGN enrichment | `GMGN_API_KEY` | key presence | Adds top-holder/trader risk signals for screening and Darwin context. If missing or failing, GMGN returns `null` and screening continues. |
-| OKX enrichment | `OKX_API_KEY`, `OKX_SECRET_KEY`, `OKX_PASSPHRASE`, optional `OKX_PROJECT_ID` | key presence | If OKX keys are present, direct OKX signed requests are used. Without keys, the bot may try Agent Meridian OKX enrichment and public OKX-style calls; failures are logged as unavailable and screening continues. |
-| Discord signal candidates | Agent Meridian API config | `useDiscordSignals`, `discordSignalMode` | Disabled by default. If enabled, fetch failures are logged and normal discovery continues unless you configure signal-only behavior. |
-| HiveMind | `hiveMindUrl`, `hiveMindApiKey`, `agentId`, `hiveMindPullMode` | non-empty URL/key | Disabled in the public example. If configured, shares/pulls aggregate lessons and presets. |
-| Jupiter | `JUPITER_API_KEY` | key presence | Optional for swap-related helpers; the code has a public fallback key/path, but serious live use should provide your own. |
+  "generalModel": "<general chat model>",
+  "generalBaseUrl": "<OpenAI-compatible base URL>",
 
-Open-position source order:
+  "managementModel": "<management model>",
+  "managementBaseUrl": "<OpenAI-compatible base URL>"
+}
+```
 
-1. If `lpAgentRelayEnabled=true`, try Agent Meridian relay.
-2. If relay fails and `LPAGENT_API_KEY` exists, try LPAgent.io direct.
-3. Fall back to Meteora portfolio and Meteora DLMM PnL APIs.
-4. Returned positions are filtered by on-chain wallet owner before management uses them.
+Do not add `generalReasoningEffort` or `managementReasoningEffort`. GENERAL and MANAGEMENT are dense non-reasoning routes. Only SCREENER uses `screeningReasoningEffort`.
 
-Close path order:
+## Main Configuration Shape
 
-1. Urgent closes skip relay and use the local close-liquidity-first path.
-2. Non-urgent closes may try Agent Meridian relay zap-out when `lpAgentRelayEnabled=true`.
-3. If relay fails before submit, the bot falls back to local Meteora close plus swap/autoswap helpers where configured.
+Main Meridian is the larger-size, more risk-averse lane. Keep its deploy sizing and screening thresholds private. A typical config shape looks like this:
 
-The public `user-config.example.json` keeps relay, HiveMind, and live-size assumptions off by default so a fresh clone does not depend on owner-only services.
+```json
+{
+  "preset": "sol_dca_accumulator",
+  "deployAmountSol": "<larger per-position size>",
+  "maxPositions": "<conservative concurrent-position cap>",
+  "maxDeployAmount": "<single-deploy safety cap>",
+
+  "minTvl": "<minimum TVL>",
+  "minFeeActiveTvlRatio": "<minimum fee/active-TVL ratio>",
+
+  "entryPreset": "rsi_reversal",
+  "indicatorIntervals": ["<entry interval>"],
+  "rsiOversold": "<oversold threshold>",
+  "exitPreset": null,
+
+  "solMode": true,
+  "trailingTakeProfit": true
+}
+```
+
+Main should stay more conservative than nanocap because each deploy uses more capital. Keep wider nanocap recall experiments separate from main unless a forward-test result justifies promotion.
+
+---
+
+## Flash-Dump Protection
+
+Nanocap exits are layered from fastest to slowest:
+
+| Trigger | Behavior |
+|---|---|
+| `hardStopLossPct` | Immediate close at the hard loss threshold |
+| `stopLossFastClosePct` | Immediate close at the fast-stop threshold |
+| `stopLossVelocityClosePct` over `stopLossVelocityWindowMs` | Immediate close when losses accelerate quickly |
+| `profitGivebackEmergencyEnabled` | Immediate close when a green position gives back below the configured floor |
+| `earlyDumpPct` within `earlyDumpMaxAgeMin` | Immediate close for fresh-position dumps |
+| `stopLossPct` | Confirm after `stopLossConfirmDelayMs`, then close if still below threshold |
+
+Urgent stop-loss paths in the PnL poller call `close_position` directly with `urgent: true`. They do not wait for MANAGER reasoning.
+
+Useful proof commands:
+
+```bash
+node scripts/verify-emergency-stop-policy.js
+node scripts/verify-stop-loss-trial-behavior.js
+node scripts/analyze-pnl-snapshots.js --json
+```
+
+---
+
+## LLM Routing
+
+All LLM providers use OpenAI-compatible chat completions.
+
+| Role | Example Route | Reasoning |
+|---|---|---|
+| SCREENER | Stronger model through an OpenAI-compatible router | Optional via `screeningReasoningEffort` |
+| GENERAL | Dense chat/tool model through an OpenAI-compatible router | none |
+| MANAGEMENT | Dense action model through an OpenAI-compatible router | none |
+| SCREENER fallback | Separate compatible fallback provider | none |
+
+Endpoint smoke test:
+
+```bash
+node scripts/verify-llm-endpoint.js \
+  --base-url <openai-compatible-base-url> \
+  --model <model-name> \
+  --api-key NO_API_KEY \
+  --chat-smoke \
+  --tool-call-smoke
+```
+
+Runtime proof:
+
+```bash
+node scripts/verify-runtime-config.js --json
+tail -n 40 logs/api-activity-$(date -u +%F).jsonl
+```
+
+Expected log shape:
+
+```json
+{"agent_role":"GENERAL","model":"<model-name>","base_url_host":"<host>","reasoning_effort":null,"status":"success"}
+{"agent_role":"MANAGER","model":"<model-name>","base_url_host":"<host>","reasoning_effort":null,"status":"success"}
+{"agent_role":"SCREENER","model":"<model-name>","base_url_host":"<host>","reasoning_effort":"<optional>","status":"success"}
+```
+
+The startup line `Model: ...` is legacy/global display text. Trust `verify-runtime-config.js` and `api-activity` for per-role routing.
+
+---
 
 ## Setup
 
-Clone the active branch:
+Requirements:
+
+- Node.js 20 on VPS
+- Solana wallet with SOL
+- RPC endpoint
+- Telegram bot token and allowed user IDs
+- Optional OpenAI-compatible local or remote router, such as [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI)
+
+Install:
 
 ```bash
-git clone -b experimental https://github.com/medbukadnezoor/meridian.git
-cd meridian
 npm install
-```
-
-Create local secrets and config:
-
-```bash
-cp .env.example .env
 cp user-config.example.json user-config.json
+cp .env.example .env
 ```
 
-Edit `.env` with your own secrets. Do not commit `.env`, private keys, raw auth headers, shell history, or live backup configs.
+Minimum `.env` shape:
 
-Edit `user-config.json` with your own thresholds and risk limits. Keep `dryRun` enabled until you have verified candidate selection, deploy construction, close paths, and Telegram permissions in your own environment.
+```env
+WALLET_PRIVATE_KEY=<base58 private key>
+RPC_URL=<solana rpc url>
+DRY_RUN=true
 
-## Common Config Areas
+TELEGRAM_BOT_TOKEN=<optional>
+TELEGRAM_CHAT_ID=<required for Telegram>
+TELEGRAM_ALLOWED_USER_IDS=<comma-separated user ids>
 
-Most runtime behavior is controlled from `user-config.json`:
+LPAGENT_API_KEY=<optional>
+OKX_API_KEY=<optional>
+GMGN_API_KEY=<optional>
+```
 
-| Area | Examples |
-|---|---|
-| Wallet/RPC | `walletKey`, `rpcUrl`, `dryRun` |
-| Sizing | `deployAmountSol`, `maxDeployAmount`, `maxPositions`, `minSolToOpen` |
-| Screening | market-cap range, TVL, volume, holders, organic score, warnings, bin step, fee/TVL thresholds |
-| LLM routing | `screeningModel`, `managementModel`, `generalModel`, base URLs, API keys, fallback models |
-| Entry style | strategy preset, chart-indicator preset, intervals, single-sided deploy guards |
-| Exits | stop loss, hard stop, early dump, take profit, trailing profit, rolling drawdown, trend-loss exits |
-| Logging | PnL snapshots, API activity, decision logs, active-bin oracle files |
+Never commit `.env`, `user-config.json`, wallet keys, API keys, live state, logs, or config backups.
 
-Use the example config as a schema guide, not as a recommendation for capital size or thresholds.
-
-## Running
-
-Dry-run first:
+Local dry-run only:
 
 ```bash
 npm run dev
 ```
 
-Live mode should only be used after you understand the code paths, config, wallet permissions, and failure modes:
+Live production bots run on VPS under PM2. Do not run `node index.js` locally while a live VPS bot is running.
+
+---
+
+## VPS Operations
+
+Main bot:
 
 ```bash
-npm start
+ssh <host> 'cd <main-bot-path> && git rev-parse --short HEAD && pm2 status <main-process-name>'
 ```
 
-For long-running use, run under a process manager such as PM2 or systemd. Keep each bot instance in its own directory, branch, wallet, logs, and config.
+Nanocap bot:
 
-## Commands
+```bash
+ssh <host> 'cd <nanocap-bot-path> && git rev-parse --short HEAD && pm2 status <nanocap-process-name>'
+```
 
-When the interactive prompt is enabled:
+Before analysis:
 
-| Command | Description |
-|---|---|
-| `/status` | Refresh wallet and open-position state. |
-| `/candidates` | Run the screening pipeline and show current candidates. |
-| `/thresholds` | Show active screening thresholds and recent performance memory. |
-| `/autoresearch` | Show shadow research trials. |
-| `/learn` | Study candidate pools and update local lessons where supported. |
-| `/stop` | Graceful shutdown. |
+```bash
+./scripts/sync-vps-full.sh
+```
 
-Telegram can expose similar control if configured, but inbound commands require explicit chat and user allowlists.
+Before restart:
 
-## Logs And Evidence
+```bash
+ssh <host> 'pm2 logs <process-name> --lines 120 --nostream'
+```
 
-Useful local artifacts include:
+Restart a process:
 
-- `logs/api-activity-YYYY-MM-DD.jsonl`
-- `logs/decision-log-YYYY-MM-DD.jsonl`
-- `logs/pnl-snapshots-YYYY-MM-DD.jsonl`
-- `logs/active-bin-oracle-YYYY-MM-DD.jsonl`
-- `pool-memory.json`
-- `state.json`
+```bash
+ssh <host> 'pm2 restart <process-name> --update-env'
+```
 
-Do not publish production logs unless you have scrubbed wallet addresses, position addresses, auth-bearing URLs, private API responses, and strategy-sensitive configuration.
-
-## Verification
-
-Before pushing or deploying code changes, run the repository verifier:
+Patch verifier:
 
 ```bash
 node scripts/verify-patches.js
 ```
 
-Some features also have focused verifiers under `scripts/verify-*.js`. Run the focused verifier for the feature you changed, then run the full verifier.
+Runtime verifier:
 
-## Nanocap Branch
+```bash
+node scripts/verify-runtime-config.js --json
+```
 
-The `nanocap-v1` branch is a separate research lane for smaller-cap mean-reversion behavior. It may contain stricter deploy-shape guards, different screening defaults, additional runtime proof scripts, and higher-churn experiments than `experimental`.
+---
 
-Use it only if you specifically want to study that lane. Keep its wallet, config, and process isolated from any main bot instance.
+## Telegram Tutorial
 
-## Privacy And Security
+Free-form Telegram requests go to `GENERAL` unless they are deploy-like, in which case they go to `SCREENER`.
 
-- Never commit `.env`, `user-config.json`, private keys, API keys, raw auth headers, Telegram tokens, VPS backups, or live wallet material.
-- Prefer `env:NAME` config references for API keys where supported.
-- Treat logs as sensitive until scrubbed.
-- Rotate any key or token that has ever been pasted into a public place.
-- Public examples intentionally omit exact live thresholds, wallet addresses, and production sizing.
+Examples:
 
-## Disclaimer
+```text
+status?
+what are your recommendations?
+screen now and see if we can deploy any pools
+find <PAIR> and screen
+why was this pool skipped?
+show wallet balances and open positions
+```
 
-This software is provided as-is, with no warranty. Autonomous liquidity management and memecoin/nanocap trading can lose funds quickly. Start in dry-run mode, use small size, inspect every configured exit path, and never deploy capital you cannot afford to lose. This is not financial advice.
+Operator config changes should use explicit slash commands:
+
+```text
+/setcfg maxPositions <number>
+/setcfg maxMcap <usd-cap>
+/setcfg stopLossFastClosePct <negative-percent>
+```
+
+Free-form messages like `change maxPositions to <number>` may be answered conversationally by GENERAL and should not be trusted as persisted config unless the logs show `update_config`.
+
+Settings menu and `/setcfg` use the operator-only `update_config` path. LLM free-form config mutation is blocked.
+
+---
+
+## Candidate Pipeline
+
+1. Meteora discovery query applies hard filters.
+2. Optional extra categories are merged and deduped.
+3. Blacklists, cooldowns, ownership flags, warning filters, and launchpad filters apply.
+4. Falling-knife and suspicious-volume vetoes remove obvious bad setups.
+5. Chart indicators confirm entry, for example an RSI, Bollinger, or Supertrend preset on the configured interval.
+6. GMGN/OKX/security enrichment adds holder and behavior signals.
+7. Darwin ranks the shortlist.
+8. SCREENER decides deploy or no-deploy.
+9. Deploy path audits range and rejects malformed/tiny ranges before transaction.
+
+Discovery filters are intentionally pre-LLM. If a pool never appears in candidates, inspect discovery filters first.
+
+Useful manual checks:
+
+```bash
+node scripts/verify-runtime-config.js --json
+node scripts/analyze-screener-trial.js --json
+rg -n "Indicator rejected|Filtered cooldown|NO DEPLOY|DEPLOYED" logs/agent-$(date -u +%F).log
+```
+
+---
+
+## Management Pipeline
+
+1. Fetch open positions.
+2. Update tracked state, OOR state, PnL history, peak PnL, and snapshots.
+3. Apply immediate exits: hard, fast, velocity, early dump, urgent OOR.
+4. Queue confirmed exits: ordinary soft stop and trailing TP rechecks.
+5. Apply deterministic close/claim rules.
+6. If all positions are `STAY`, skip MANAGER LLM.
+7. If action is required, MANAGER executes only the required tool calls.
+8. After management, screening may run if there is free capacity.
+
+Useful log patterns:
+
+```bash
+rg -n "Hard stop loss|Fast stop loss|Velocity stop loss|Early dump|Stop loss candidate|Stop loss confirmed|Direct stop-loss close" logs/agent-$(date -u +%F).log
+rg -n '"agent_role":"MANAGER"' logs/api-activity-$(date -u +%F).jsonl
+```
+
+---
+
+## Learning And Reports
+
+Closed outcomes are classified into:
+
+- raw wins/losses
+- material wins
+- material losses
+- neutral dust/low-yield/operator closes
+
+Darwin can exclude neutral outcomes so low-yield dust closes do not distort strategy learning.
+
+Useful commands:
+
+```bash
+node scripts/analyze-material-wins.js --actions logs --json
+node scripts/analyze-pnl-snapshots.js --json
+node scripts/analyze-llm-usage.js --json
+```
+
+---
+
+## Git And Branch Hygiene
+
+Live code branches:
+
+```text
+experimental  -> main VPS bot
+nanocap-v1    -> nanocap VPS bot
+```
+
+Suggested local worktree intent:
+
+```text
+<main-worktree>     experimental
+<nanocap-worktree>  nanocap-v1
+```
+
+Old worktrees should be archived or removed instead of left around as active-looking branches.
+
+Before pushing code:
+
+```bash
+node scripts/verify-patches.js
+git status --short --branch
+```
+
+Push nanocap:
+
+```bash
+git push origin nanocap-v1
+git push private nanocap-v1
+```
+
+Push main:
+
+```bash
+git push origin experimental
+git push private experimental
+```
+
+---
+
+## Safety Rules
+
+- Do not run `node index.js` locally while a VPS bot is live.
+- Do not restart without checking PM2 logs first.
+- Do not commit credentials or runtime config.
+- Do not edit `CLAUDE.md` or `GEMINI.md` directly; keep `AGENTS.md` canonical and use the refresh workflow.
+- Use `/setcfg` or CLI config set for live config changes.
+- Use `verify-runtime-config.js --json` after config changes.
+- Use `verify-patches.js` before pushing code.
