@@ -11,8 +11,8 @@ import path from "path";
 import { resolve } from "path";
 import { fileURLToPath } from "url";
 
-const DEFAULT_LOG_DIR = "/Users/marcelyuwono/Trading Project Files/DLMM/meridian-intelligence/data/vps-logs/nanocap/logs";
-const DEFAULT_OUTPUT = "/Users/marcelyuwono/Trading Project Files/DLMM/meridian-intelligence/reports/latest_rolling_drawdown_replay_nanocap.md";
+const DEFAULT_LOG_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "meridian-intelligence", "data", "vps-logs", "nanocap", "logs");
+const DEFAULT_OUTPUT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "meridian-intelligence", "reports", "latest_rolling_drawdown_replay_nanocap.md");
 
 export const DEFAULT_RULE = Object.freeze({
   currentPnlPctAtOrBelow: -2,
